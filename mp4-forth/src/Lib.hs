@@ -98,7 +98,11 @@ liftIntOp _  _        = Nothing
 --- ### `liftCompOp`
 
 liftCompOp :: (Integer -> Integer -> Bool) -> IStack -> Maybe IStack
-liftCompOp = undefined
+liftCompOp op (x:y:xs)
+    = if op y x
+        then Just $ (-1) :xs 
+        else Just $ 0 :xs
+liftCompOp _ _ = Nothing
 
 
 --- The Dictionary
@@ -123,20 +127,33 @@ initCompileOp = [ (":",    Define)
 
 initArith :: Dictionary
 initArith = [ ("+",  Prim $ liftIStackOp $ liftIntOp (+))
+            , ("-",  Prim $ liftIStackOp $ liftIntOp (-))
+            , ("*",  Prim $ liftIStackOp $ liftIntOp (*))
+            , ("/",  Prim $ liftIStackOp $ liftIntOp div)
             ]
 
 --- ### Comparison Operators
 
 initComp :: Dictionary
-initComp = []
+initComp = [ ("<",  Prim $ liftIStackOp $ liftCompOp (<))
+           , ("<=",  Prim $ liftIStackOp $ liftCompOp (<=))
+           , ("=",  Prim $ liftIStackOp $ liftCompOp (==))
+           , (">=",  Prim $ liftIStackOp $ liftCompOp (>=))
+           , (">",  Prim $ liftIStackOp $ liftCompOp (>))
+           , ("!=",  Prim $ liftIStackOp $ liftCompOp (/=))
+           ]
 
 --- ### Stack Manipulations
 
 initIStackOp :: Dictionary
 initIStackOp = [ ("dup",  Prim $ liftIStackOp istackDup)
+               , ("swap",  Prim $ liftIStackOp istackSwap)
+               , ("drop",  Prim $ liftIStackOp istackDrop)
+               , ("rot",  Prim $ liftIStackOp istackRot)
                ]
 
 initPrintOp = [ (".",  Prim printPop)
+              , (".S",  Prim printStack)
               ]
 
 istackDup :: IStack -> Maybe IStack
@@ -144,13 +161,16 @@ istackDup (i:is) = Just $ i:i:is
 istackDup _      = Nothing
 
 istackSwap :: IStack -> Maybe IStack
-istackSwap = undefined
+istackSwap (i:j:is) = Just $ j:i:is 
+istackSwap _        = Nothing
 
 istackDrop :: IStack -> Maybe IStack
-istackDrop = undefined
+istackDrop (i:is) = Just is 
+istackDrop _      = Nothing
 
 istackRot :: IStack -> Maybe IStack
-istackRot = undefined
+istackRot (i:j:k:is) = Just $ k:i:j:is
+istackRot _          = Nothing 
 
 --- ### Popping the Stack
 
@@ -162,7 +182,7 @@ printPop _ = underflow
 --- ### Printing the Stack
 
 printStack :: ForthState -> ForthState
-printStack (istack, dict, out) = undefined
+printStack (istack, dict, out) = (istack, dict, unwords (map show (reverse istack)):out )
 
 --- Evaluator
 --- ---------
@@ -213,16 +233,25 @@ cstackNext _ = Nothing
 --- ### Conditionals
 
 cstackIf :: CStack -> Maybe CStack
-cstackIf cstack = undefined
+cstackIf cstack = Just $ ("if", id):cstack -- ???
 
 cstackElse :: CStack -> Maybe CStack
-cstackElse cstack@(("if", _):_) = undefined
+cstackElse cstack@(("if", _):_) = Just $ ("else", id):cstack -- ???
 cstackElse _ = Nothing
 
 cstackThen :: CStack -> Maybe CStack
-cstackThen (("else", kelse):("if", kif):(c, kold):cstack) = undefined
-cstackThen (("if", kif):(c, kold):cstack) = undefined
+cstackThen (("else", kelse):("if", kif):(c, kold):cstack) = 
+    Just ((c, knew):cstack) where knew = (branch kif kelse) . kold
+cstackThen (("if", kif):(c, kold):cstack) = 
+    Just ((c, knew):cstack) where knew = (branch kif id) . kold
 cstackThen _ = Nothing
+
+branch :: Transition -> Transition -> (ForthState -> ForthState)
+branch kif kelse (i:is, d, o) = 
+    if i < 0
+        then kif (is, d, o)
+        else kelse (is, d, o)
+branch _ _ _ = underflow
 
 --- ### Indefinite Loops
 
@@ -230,9 +259,16 @@ cstackBegin :: CStack -> Maybe CStack
 cstackBegin cstack = Just $ ("begin", id):cstack
 
 cstackUntil :: CStack -> Maybe CStack
-cstackUntil (("begin", kloop):(c, kold):cstack) = undefined
+cstackUntil (("begin", kloop):(c, kold):cstack) = 
+    Just((c, knew):cstack) where knew = (transIndeLoop kloop) . kold
 cstackUntil _ = Nothing
 
+transIndeLoop :: Transition -> (ForthState -> ForthState)
+transIndeLoop kloop (is, d, o) = 
+    if i == 0
+        then transIndeLoop kloop (is', d', o')
+        else (is', d', o')
+    where (i:is', d', o') = kloop (is, d, o) 
 
 --- ### Lookup in dictionary
 
