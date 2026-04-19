@@ -66,13 +66,16 @@ keywords = [ "define"
 eval :: Val -> EvalState Val
 
 -- Self-evaluating expressions
--- TODO: What's self-evaluating?
-eval v@(Number _) = unimplemented "Evaluating numbers"
-eval v@(Boolean _) = unimplemented "Evaluating booleans"
+eval v@(Number _) = return v --unimplemented "Evaluating numbers"
+eval v@(Boolean _) = return v --unimplemented "Evaluating booleans"
 
 -- Symbol evaluates to the value bound to it
--- TODO
-eval (Symbol sym) = unimplemented "Evaluating symbols"
+eval (Symbol sym) = do
+  env <- get 
+  case H.lookup sym env of 
+    Just val -> return val
+    Nothing -> throwError $ UndefSymbolError sym
+
 
 -- Function closure is also self-evaluating
 eval v@(Func _ _ _) = return v
@@ -97,12 +100,12 @@ eval expr@(Pair v1 v2) = case flattenList expr of
 
     -- quote
     -- TODO
-    evalList [Symbol "quote", e] = unimplemented "Special form `quote`"
+    evalList [Symbol "quote", e] = return e
 
     -- unquote (illegal at surface evaluation)
     -- TODO: since surface-level `unquote` is illegal, all you need to do is
     -- to throw a diagnostic
-    evalList [Symbol "unquote", e] = unimplemented "Special form `unquote`"
+    evalList [Symbol "unquote", e] = throwError $ UnquoteNotInQuasiquote expr
 
     -- quasiquote
     evalList [Symbol "quasiquote", e] = evalQuasi 1 e where
@@ -120,12 +123,44 @@ eval expr@(Pair v1 v2) = case flattenList expr of
 
     -- cond
     -- TODO: Handle `cond` here. Use pattern matching to match the syntax
+    evalList (Symbol "cond" : clauses) =
+      case clauses of
+        [] -> throwError $ InvalidSpecialForm "cond" expr
+        _  -> condHelp clauses
+      where 
+        condHelp [] = return Void
+        condHelp (clause:cs) = do
+          (c, e) <- getListOf2 clause
+          case c of
+            Symbol "else" -> 
+              if null cs 
+                then eval e 
+                else throwError $ InvalidSpecialForm "cond" expr
+            _ -> do
+              condition <- eval c
+              case condition of
+                Boolean False -> condHelp cs 
+                _             -> eval e       
 
     -- let
     -- TODO: Handle `let` here. Use pattern matching to match the syntax
+    evalList [Symbol "let", bindings, body] = do 
+      oldEnv <- get
+      bindingList <- getList bindings
+      newBindings <- mapM getBinding bindingList
+      let envForBody = H.union (H.fromList newBindings) oldEnv
+      put envForBody
+      res <- eval body
+      put oldEnv
+      return res
 
     -- lambda
     -- TODO: Handle `lambda` here. Use pattern matching to match the syntax
+    evalList [Symbol "lambda", args, body] = do -- ???
+      env <- get 
+      argList <- getList args 
+      params <- mapM getSym argList
+      return $ Func params body env 
 
     -- define function
     evalList [Symbol "define", Pair (Symbol fname) args, body] =
@@ -136,12 +171,21 @@ eval expr@(Pair v1 v2) = case flattenList expr of
          return Void
 
     -- define variable
-    -- TODO: Handle `define` for variables here. Use pattern matching
-    -- to match the syntax
+    evalList [Symbol "define", Symbol var, exp] = do
+      --env <- get
+      val <- eval exp
+      modify $ H.insert var val
+      return Void
 
     -- define-macro
     -- TODO: Handle `define-macro` here. Use pattern matching to match
     -- the syntax
+    evalList [Symbol "define-macro", Pair (Symbol mname) args, body] = do 
+      argList <- getList args
+      params <- mapM getSym argList 
+      let macro = Macro params body
+      modify $ H.insert mname macro
+      return Void
 
     -- invalid use of keyword, throw a diagnostic
     evalList (Symbol sym : _) | elem sym keywords = invalidSpecialForm sym
@@ -156,12 +200,26 @@ eval val = throwError $ InvalidExpression val
 -- Function application
 apply :: Val -> [Val] -> EvalState Val
   -- Function
-    -- TODO: implement function application
-    -- Use do-notation!
+apply (Func params body cEnv) args = do 
+  argVals <- mapM eval args
+  oldEnv <- get 
+  let newEnv = H.union (H.fromList (zip params argVals)) (H.union cEnv oldEnv)
+  put newEnv 
+  result <- eval body 
+  put oldEnv
+  return result
 
   -- Macro
     -- TODO: implement macro evaluation
     -- Use do-notation!
+apply (Macro params body) args = do 
+  oldEnv <- get 
+  let newEnv = H.union (H.fromList (zip params args)) oldEnv
+  put newEnv 
+  mac <- eval body 
+  put oldEnv
+  result <- eval mac 
+  return result
 
   -- Primitive
 apply (PrimFunc p) args =

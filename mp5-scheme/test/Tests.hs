@@ -51,7 +51,7 @@ unitTests = testGroup "Unit Tests"
     [arithRuntimeTests, boolRuntimeTests, compRuntimeTests, listOpsTests,
     unaryRuntimeTests, equalityTests, moduloTests, typePredTests] 
   , testGroup "=G= Evaluator Tests"
-    [atomTests, lookupTests, defineTests1, defineTests2, hofTests, condTests,
+    [atomTests, lookupTests, defineTests1, defineTests2, lambdaTests, hofTests, condTests,
     letTests, quoteEvalTests, defmacroTests, evalTests, extraRuntimeTests] 
   ]
 
